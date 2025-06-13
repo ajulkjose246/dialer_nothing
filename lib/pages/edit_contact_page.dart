@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
+import 'package:image_picker/image_picker.dart';
+import 'dart:typed_data';
+import 'dart:io';
 
 class EditContactPage extends StatefulWidget {
   final Contact contact;
@@ -13,25 +16,33 @@ class EditContactPage extends StatefulWidget {
 class _EditContactPageState extends State<EditContactPage> {
   final _formKey = GlobalKey<FormState>();
   late TextEditingController _nameController;
-  late TextEditingController _phoneController;
-  late TextEditingController _emailController;
+  late List<TextEditingController> _phoneControllers;
+  late List<TextEditingController> _emailControllers;
   late TextEditingController _addressController;
   late TextEditingController _notesController;
+  Uint8List? _selectedPhoto;
 
   @override
   void initState() {
     super.initState();
     _nameController = TextEditingController(text: widget.contact.displayName);
-    _phoneController = TextEditingController(
-      text: widget.contact.phones.isNotEmpty
-          ? widget.contact.phones.first.number
-          : '',
-    );
-    _emailController = TextEditingController(
-      text: widget.contact.emails.isNotEmpty
-          ? widget.contact.emails.first.address
-          : '',
-    );
+
+    // Initialize phone controllers
+    _phoneControllers = widget.contact.phones.map((phone) {
+      return TextEditingController(text: phone.number);
+    }).toList();
+    if (_phoneControllers.isEmpty) {
+      _phoneControllers.add(TextEditingController());
+    }
+
+    // Initialize email controllers
+    _emailControllers = widget.contact.emails.map((email) {
+      return TextEditingController(text: email.address);
+    }).toList();
+    if (_emailControllers.isEmpty) {
+      _emailControllers.add(TextEditingController());
+    }
+
     _addressController = TextEditingController(
       text: widget.contact.addresses.isNotEmpty
           ? widget.contact.addresses.first.address
@@ -42,16 +53,69 @@ class _EditContactPageState extends State<EditContactPage> {
           ? widget.contact.notes!.first.note
           : '',
     );
+    _selectedPhoto = widget.contact.photo;
   }
 
   @override
   void dispose() {
     _nameController.dispose();
-    _phoneController.dispose();
-    _emailController.dispose();
+    for (var controller in _phoneControllers) {
+      controller.dispose();
+    }
+    for (var controller in _emailControllers) {
+      controller.dispose();
+    }
     _addressController.dispose();
     _notesController.dispose();
     super.dispose();
+  }
+
+  void _addPhoneField() {
+    setState(() {
+      _phoneControllers.add(TextEditingController());
+    });
+  }
+
+  void _removePhoneField(int index) {
+    if (_phoneControllers.length > 1) {
+      setState(() {
+        _phoneControllers[index].dispose();
+        _phoneControllers.removeAt(index);
+      });
+    }
+  }
+
+  void _addEmailField() {
+    setState(() {
+      _emailControllers.add(TextEditingController());
+    });
+  }
+
+  void _removeEmailField(int index) {
+    if (_emailControllers.length > 1) {
+      setState(() {
+        _emailControllers[index].dispose();
+        _emailControllers.removeAt(index);
+      });
+    }
+  }
+
+  Future<void> _pickImage() async {
+    final ImagePicker picker = ImagePicker();
+    final XFile? image = await picker.pickImage(source: ImageSource.gallery);
+
+    if (image != null) {
+      final bytes = await image.readAsBytes();
+      setState(() {
+        _selectedPhoto = bytes;
+      });
+    }
+  }
+
+  Future<void> _removePhoto() async {
+    setState(() {
+      _selectedPhoto = null;
+    });
   }
 
   Future<void> _saveContact() async {
@@ -67,17 +131,24 @@ class _EditContactPageState extends State<EditContactPage> {
       contact.name.first = newName;
       contact.name.last = ''; // Clear last name to avoid conflicts
 
-      // Update phone if provided
-      if (_phoneController.text.trim().isNotEmpty) {
-        contact.phones = [Phone(_phoneController.text.trim())];
+      // Update photo if changed
+      if (_selectedPhoto != widget.contact.photo) {
+        contact.photo = _selectedPhoto;
       }
 
-      // Update email - clear if empty
-      if (_emailController.text.trim().isNotEmpty) {
-        contact.emails = [Email(_emailController.text.trim())];
-      } else {
-        contact.emails = []; // Clear emails if empty
-      }
+      // Update phones
+      contact.phones = _phoneControllers
+          .map((controller) => controller.text.trim())
+          .where((number) => number.isNotEmpty)
+          .map((number) => Phone(number))
+          .toList();
+
+      // Update emails
+      contact.emails = _emailControllers
+          .map((controller) => controller.text.trim())
+          .where((email) => email.isNotEmpty)
+          .map((email) => Email(email))
+          .toList();
 
       // Update address - clear if empty
       if (_addressController.text.trim().isNotEmpty) {
@@ -179,36 +250,60 @@ class _EditContactPageState extends State<EditContactPage> {
           children: [
             Hero(
               tag: 'contact_${widget.contact.id}',
-              child: Center(
-                child: Container(
-                  width: 100,
-                  height: 100,
-                  margin: const EdgeInsets.only(bottom: 24),
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color:
-                        Theme.of(context).colorScheme.primary.withOpacity(0.1),
-                  ),
-                  child: widget.contact.photo != null
-                      ? ClipOval(
-                          child: Image.memory(
-                            widget.contact.photo!,
-                            fit: BoxFit.cover,
-                          ),
-                        )
-                      : Center(
-                          child: Text(
-                            widget.contact.displayName.isNotEmpty
-                                ? widget.contact.displayName[0].toUpperCase()
-                                : '?',
-                            style: TextStyle(
-                              fontFamily: 'nothing',
-                              fontSize: 40,
-                              fontWeight: FontWeight.w600,
-                              color: Theme.of(context).colorScheme.primary,
-                            ),
+              child: GestureDetector(
+                onTap: _pickImage,
+                child: Stack(
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 100,
+                        height: 100,
+                        margin: const EdgeInsets.only(bottom: 24),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .primary
+                              .withOpacity(0.1),
+                        ),
+                        child: _selectedPhoto != null
+                            ? ClipOval(
+                                child: Image.memory(
+                                  _selectedPhoto!,
+                                  fit: BoxFit.cover,
+                                ),
+                              )
+                            : Center(
+                                child: Text(
+                                  widget.contact.displayName.isNotEmpty
+                                      ? widget.contact.displayName[0]
+                                          .toUpperCase()
+                                      : '?',
+                                  style: TextStyle(
+                                    fontFamily: 'nothing',
+                                    fontSize: 40,
+                                    fontWeight: FontWeight.w600,
+                                    color:
+                                        Theme.of(context).colorScheme.primary,
+                                  ),
+                                ),
+                              ),
+                      ),
+                    ),
+                    if (_selectedPhoto != null)
+                      Positioned(
+                        right: 0,
+                        bottom: 24,
+                        child: IconButton(
+                          icon: const Icon(Icons.delete_outline),
+                          onPressed: _removePhoto,
+                          style: IconButton.styleFrom(
+                            backgroundColor:
+                                Theme.of(context).colorScheme.surface,
                           ),
                         ),
+                      ),
+                  ],
                 ),
               ),
             ),
@@ -230,30 +325,84 @@ class _EditContactPageState extends State<EditContactPage> {
               },
             ),
             const SizedBox(height: 16),
-            TextFormField(
-              controller: _phoneController,
-              style: const TextStyle(fontFamily: 'nothing'),
-              decoration: InputDecoration(
-                labelText: 'Phone',
-                labelStyle: const TextStyle(fontFamily: 'nothing'),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
+            // Phone numbers section
+            ...List.generate(_phoneControllers.length, (index) {
+              return Padding(
+                padding: EdgeInsets.only(
+                    bottom: index == _phoneControllers.length - 1 ? 16 : 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                        controller: _phoneControllers[index],
+                        style: const TextStyle(fontFamily: 'nothing'),
+                        decoration: InputDecoration(
+                          labelText: 'Phone ${index + 1}',
+                          labelStyle: const TextStyle(fontFamily: 'nothing'),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        keyboardType: TextInputType.phone,
+                      ),
+                    ),
+                    if (_phoneControllers.length > 1)
+                      IconButton(
+                        icon: const Icon(Icons.remove_circle_outline),
+                        onPressed: () => _removePhoneField(index),
+                      ),
+                  ],
                 ),
+              );
+            }),
+            // Add phone button
+            TextButton.icon(
+              onPressed: _addPhoneField,
+              icon: const Icon(Icons.add),
+              label: const Text(
+                'Add Phone Number',
+                style: TextStyle(fontFamily: 'nothing'),
               ),
-              keyboardType: TextInputType.phone,
             ),
             const SizedBox(height: 16),
-            TextFormField(
-              controller: _emailController,
-              style: const TextStyle(fontFamily: 'nothing'),
-              decoration: InputDecoration(
-                labelText: 'Email',
-                labelStyle: const TextStyle(fontFamily: 'nothing'),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
+            // Email addresses section
+            ...List.generate(_emailControllers.length, (index) {
+              return Padding(
+                padding: EdgeInsets.only(
+                    bottom: index == _emailControllers.length - 1 ? 16 : 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                        controller: _emailControllers[index],
+                        style: const TextStyle(fontFamily: 'nothing'),
+                        decoration: InputDecoration(
+                          labelText: 'Email ${index + 1}',
+                          labelStyle: const TextStyle(fontFamily: 'nothing'),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        keyboardType: TextInputType.emailAddress,
+                      ),
+                    ),
+                    if (_emailControllers.length > 1)
+                      IconButton(
+                        icon: const Icon(Icons.remove_circle_outline),
+                        onPressed: () => _removeEmailField(index),
+                      ),
+                  ],
                 ),
+              );
+            }),
+            // Add email button
+            TextButton.icon(
+              onPressed: _addEmailField,
+              icon: const Icon(Icons.add),
+              label: const Text(
+                'Add Email Address',
+                style: TextStyle(fontFamily: 'nothing'),
               ),
-              keyboardType: TextInputType.emailAddress,
             ),
             const SizedBox(height: 16),
             TextFormField(
