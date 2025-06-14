@@ -281,7 +281,7 @@ class _ContactDetailsPageState extends State<ContactDetailsPage> {
                       (email) => _buildEmailCard(
                         context,
                         email.address,
-                        email.label?.toString(),
+                        email.label.toString(),
                       ),
                     ),
                   ],
@@ -293,15 +293,15 @@ class _ContactDetailsPageState extends State<ContactDetailsPage> {
                       (address) => _buildAddressCard(
                         context,
                         address.address,
-                        address.label?.toString(),
+                        address.label.toString(),
                       ),
                     ),
                   ],
-                  if (contact.notes?.isNotEmpty ?? false) ...[
+                  if (contact.notes.isNotEmpty ?? false) ...[
                     const SizedBox(height: 24),
                     _buildSectionHeader(context, 'Notes'),
                     const SizedBox(height: 8),
-                    _buildNotesCard(context, contact.notes!.first.note),
+                    _buildNotesCard(context, contact.notes.first.note),
                   ],
                 ],
               ),
@@ -427,16 +427,6 @@ class _ContactDetailsPageState extends State<ContactDetailsPage> {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                    if (label != null) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        label,
-                        style: TextStyle(
-                          fontFamily: 'nothing',
-                          color: Theme.of(context).textTheme.bodySmall?.color,
-                        ),
-                      ),
-                    ],
                   ],
                 ),
               ),
@@ -498,16 +488,6 @@ class _ContactDetailsPageState extends State<ContactDetailsPage> {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                    if (label != null) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        label,
-                        style: TextStyle(
-                          fontFamily: 'nothing',
-                          color: Theme.of(context).textTheme.bodySmall?.color,
-                        ),
-                      ),
-                    ],
                   ],
                 ),
               ),

@@ -49,8 +49,8 @@ class _EditContactPageState extends State<EditContactPage> {
           : '',
     );
     _notesController = TextEditingController(
-      text: widget.contact.notes?.isNotEmpty ?? false
-          ? widget.contact.notes!.first.note
+      text: widget.contact.notes.isNotEmpty ?? false
+          ? widget.contact.notes.first.note
           : '',
     );
     _selectedPhoto = widget.contact.photo;

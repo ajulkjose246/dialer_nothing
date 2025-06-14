@@ -1,8 +1,38 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:provider/provider.dart';
-import 'package:dialer/pages/contact_details_page.dart';
 import 'package:dialer/providers/contact_provider.dart';
+import 'package:flutter_contacts/flutter_contacts.dart';
+import 'package:dialer/pages/contact_details_page.dart';
+import 'dart:async';
+
+class ContactBean {
+  final Contact contact;
+  String? tagIndex;
+  String? namePinyin;
+  bool isShowSuspension = false;
+
+  ContactBean(this.contact) {
+    // Handle empty or invalid names
+    if (contact.displayName.isEmpty) {
+      tagIndex = '#';
+    } else {
+      try {
+        // Safely get the first character and ensure it's a valid UTF-16 character
+        final firstChar = contact.displayName[0];
+        final codeUnit = firstChar.codeUnitAt(0);
+        if (codeUnit > 0xFFFF || !RegExp(r'[a-zA-Z]').hasMatch(firstChar)) {
+          tagIndex = '#';
+        } else {
+          tagIndex = firstChar.toUpperCase();
+        }
+      } catch (e) {
+        tagIndex = '#';
+      }
+    }
+  }
+
+  String getSuspensionTag() => tagIndex ?? '#';
+}
 
 class ContactPage extends StatefulWidget {
   const ContactPage({super.key});
@@ -14,6 +44,16 @@ class ContactPage extends StatefulWidget {
 class _ContactPageState extends State<ContactPage>
     with AutomaticKeepAliveClientMixin {
   final TextEditingController _searchController = TextEditingController();
+  final List<String> _alphabet = [
+    '#',
+    ...List.generate(26, (index) => String.fromCharCode(65 + index))
+  ];
+  String? _selectedLetter;
+  bool _isScrolling = false;
+  Timer? _scrollTimer;
+  final Map<String, Widget> _avatarCache = {};
+  final Map<String, int> _indexMap = {};
+  final ScrollController _scrollController = ScrollController();
 
   @override
   bool get wantKeepAlive => true;
@@ -29,7 +69,134 @@ class _ContactPageState extends State<ContactPage>
   @override
   void dispose() {
     _searchController.dispose();
+    _scrollTimer?.cancel();
+    _avatarCache.clear();
+    _indexMap.clear();
+    _scrollController.dispose();
     super.dispose();
+  }
+
+  String _sanitizeText(String text) {
+    try {
+      // Remove any invalid UTF-16 characters
+      return text
+          .replaceAll(RegExp(r'[\uD800-\uDBFF][\uDC00-\uDFFF]'), '')
+          .replaceAll(RegExp(r'[^\x00-\x7F]'), '');
+    } catch (e) {
+      return 'Unknown';
+    }
+  }
+
+  void _updateIndexMap(List<ContactBean> contacts) {
+    _indexMap.clear();
+    for (int i = 0; i < contacts.length; i++) {
+      final tag = contacts[i].getSuspensionTag();
+      if (!_indexMap.containsKey(tag)) {
+        _indexMap[tag] = i;
+      }
+    }
+  }
+
+  void _handleIndexBarScroll(String tag) {
+    if (!mounted) return;
+
+    setState(() {
+      _selectedLetter = tag;
+      _isScrolling = true;
+    });
+
+    _scrollTimer?.cancel();
+    _scrollTimer = Timer(const Duration(milliseconds: 300), () {
+      if (mounted) {
+        setState(() {
+          _isScrolling = false;
+        });
+      }
+    });
+  }
+
+  Widget _buildContactAvatar(Contact contact, BuildContext context) {
+    final cacheKey = '${contact.id}_${contact.photo != null}';
+    if (_avatarCache.containsKey(cacheKey)) {
+      return _avatarCache[cacheKey]!;
+    }
+
+    final avatar = contact.photo != null
+        ? CircleAvatar(
+            radius: 24,
+            backgroundImage: MemoryImage(contact.photo!),
+          )
+        : CircleAvatar(
+            radius: 24,
+            backgroundColor:
+                Theme.of(context).colorScheme.primary.withOpacity(0.1),
+            child: Text(
+              _sanitizeText(contact.displayName).isNotEmpty
+                  ? _sanitizeText(contact.displayName)[0].toUpperCase()
+                  : '?',
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.primary,
+                fontFamily: 'nothing',
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          );
+
+    _avatarCache[cacheKey] = avatar;
+    return avatar;
+  }
+
+  Widget _buildContactTile(ContactBean contactBean, BuildContext context) {
+    final contact = contactBean.contact;
+    final displayName = _sanitizeText(contact.displayName);
+    String? phoneNumber;
+    try {
+      phoneNumber = contact.phones.isNotEmpty
+          ? _sanitizeText(contact.phones.first.number)
+          : null;
+    } catch (e) {
+      phoneNumber = null;
+    }
+
+    return ListTile(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ContactDetailsPage(contact: contact),
+          ),
+        );
+      },
+      title: Text(
+        displayName,
+        style: const TextStyle(fontFamily: 'nothing'),
+      ),
+      leading: Hero(
+        tag: 'contact_${contact.id}',
+        child: _buildContactAvatar(contact, context),
+      ),
+      subtitle: phoneNumber != null
+          ? Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                phoneNumber,
+                style: TextStyle(
+                  fontFamily: 'nothing',
+                  fontSize: 14,
+                  color: Theme.of(context).textTheme.bodySmall?.color,
+                ),
+              ),
+            )
+          : null,
+      trailing: IconButton(
+        icon: const Icon(Icons.phone_outlined),
+        onPressed: () {
+          // TODO: Implement call functionality
+        },
+        color: Theme.of(context).colorScheme.primary,
+      ),
+    );
   }
 
   @override
@@ -52,9 +219,8 @@ class _ContactPageState extends State<ContactPage>
                   Icon(
                     Icons.contacts_outlined,
                     size: 64,
-                    color: Theme.of(
-                      context,
-                    ).colorScheme.primary.withOpacity(0.5),
+                    color:
+                        Theme.of(context).colorScheme.primary.withOpacity(0.5),
                   ),
                   const SizedBox(height: 16),
                   const Text(
@@ -88,6 +254,12 @@ class _ContactPageState extends State<ContactPage>
             ),
           );
         }
+
+        final contactBeans = contactProvider.filteredContacts
+            .map((contact) => ContactBean(contact))
+            .toList();
+
+        _updateIndexMap(contactBeans);
 
         return SafeArea(
           child: Column(
@@ -131,108 +303,49 @@ class _ContactPageState extends State<ContactPage>
                 ),
               ),
               Expanded(
-                child: RefreshIndicator(
-                  onRefresh: contactProvider.refreshContacts,
-                  child: ListView.builder(
-                    padding: const EdgeInsets.only(top: 8),
-                    itemCount: contactProvider.filteredContacts.length,
-                    itemBuilder: (context, index) {
-                      final contact = contactProvider.filteredContacts[index];
-                      return Card(
-                        margin: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 4,
+                child: Stack(
+                  children: [
+                    RefreshIndicator(
+                      onRefresh: contactProvider.refreshContacts,
+                      child: ScrollbarTheme(
+                        data: ScrollbarThemeData(
+                          thickness: MaterialStateProperty.all(6),
                         ),
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          side: BorderSide(
-                            color: Theme.of(
-                              context,
-                            ).dividerColor.withOpacity(0.1),
+                        child: Scrollbar(
+                          thumbVisibility: true,
+                          controller: _scrollController,
+                          child: ListView.builder(
+                            controller: _scrollController,
+                            physics: const ClampingScrollPhysics(),
+                            itemCount: contactBeans.length,
+                            itemBuilder: (context, index) {
+                              final contactBean = contactBeans[index];
+                              return _buildContactTile(contactBean, context);
+                            },
                           ),
                         ),
-                        child: InkWell(
-                          onTap: () async {
-                            await Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) =>
-                                    ContactDetailsPage(contact: contact),
-                              ),
-                            );
-                          },
-                          borderRadius: BorderRadius.circular(12),
-                          child: ListTile(
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 8,
-                            ),
-                            leading: Hero(
-                              tag: 'contact_${contact.id}',
-                              child: contact.photo != null
-                                  ? CircleAvatar(
-                                      radius: 24,
-                                      backgroundImage: MemoryImage(
-                                        contact.photo!,
-                                      ),
-                                    )
-                                  : CircleAvatar(
-                                      radius: 24,
-                                      backgroundColor: Theme.of(
-                                        context,
-                                      ).colorScheme.primary.withOpacity(0.1),
-                                      child: Text(
-                                        contact.displayName.isNotEmpty
-                                            ? contact.displayName[0]
-                                                .toUpperCase()
-                                            : '?',
-                                        style: TextStyle(
-                                          color: Theme.of(
-                                            context,
-                                          ).colorScheme.primary,
-                                          fontFamily: 'nothing',
-                                          fontSize: 18,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                    ),
-                            ),
-                            title: Text(
-                              contact.displayName,
-                              style: const TextStyle(
-                                fontFamily: 'nothing',
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            subtitle: contact.phones.isNotEmpty
-                                ? Padding(
-                                    padding: const EdgeInsets.only(top: 4),
-                                    child: Text(
-                                      contact.phones.first.number,
-                                      style: TextStyle(
-                                        fontFamily: 'nothing',
-                                        fontSize: 14,
-                                        color: Theme.of(
-                                          context,
-                                        ).textTheme.bodySmall?.color,
-                                      ),
-                                    ),
-                                  )
-                                : null,
-                            trailing: IconButton(
-                              icon: const Icon(Icons.phone_outlined),
-                              onPressed: () {
-                                // TODO: Implement call functionality
-                              },
-                              color: Theme.of(context).colorScheme.primary,
+                      ),
+                    ),
+                    if (_isScrolling)
+                      Center(
+                        child: Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).colorScheme.primary,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            _selectedLetter ?? '',
+                            style: const TextStyle(
+                              fontFamily: 'nothing',
+                              fontSize: 24,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
                             ),
                           ),
                         ),
-                      );
-                    },
-                  ),
+                      ),
+                  ],
                 ),
               ),
             ],
